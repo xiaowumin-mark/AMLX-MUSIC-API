@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"net/http/cookiejar"
 	"net/url"
 	"strings"
 )
@@ -24,6 +25,13 @@ func New(hc *http.Client) *Client {
 	if hc == nil {
 		hc = http.DefaultClient
 	}
+	if hc.Jar == nil {
+		if jar, err := cookiejar.New(nil); err == nil {
+			clone := *hc
+			clone.Jar = jar
+			hc = &clone
+		}
+	}
 	return &Client{hc: hc, common: make(map[string]string)}
 }
 
@@ -35,7 +43,9 @@ func (c *Client) SetCommonHeader(key, value string) {
 // Do performs an HTTP request with common headers applied.
 func (c *Client) Do(req *http.Request) (*http.Response, error) {
 	for k, v := range c.common {
-		req.Header.Set(k, v)
+		if req.Header.Get(k) == "" {
+			req.Header.Set(k, v)
+		}
 	}
 	return c.hc.Do(req)
 }

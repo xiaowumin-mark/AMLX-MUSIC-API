@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/xiaowumin-mark/AMLX-MUSIC-API"
 	"github.com/xiaowumin-mark/AMLX-MUSIC-API/internal/httpclient"
@@ -29,7 +30,7 @@ const (
 	artistDetailPath   = "/api/artist/head/info/get"
 	recommendSongsPath = "/v3/discovery/recommend/songs"
 
-	pcUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36 Edg/124.0.0.0"
+	pcUserAgent = "Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Safari/537.36 Chrome/91.0.4472.164 NeteaseMusicDesktop/3.1.17.204416"
 	referer     = "https://music.163.com"
 )
 
@@ -59,6 +60,9 @@ func New(opts ...musicapi.Option) (*Client, error) {
 	}
 	c.http.SetCommonHeader("User-Agent", pcUserAgent)
 	c.http.SetCommonHeader("Referer", referer)
+	if cfg.Cookie != "" {
+		c.http.SetCommonHeader("Cookie", cfg.Cookie)
+	}
 
 	devID, err := util.RandomHex(26)
 	if err != nil {
@@ -246,11 +250,12 @@ func (c *Client) GetLyric(ctx context.Context, songID string) (*musicapi.Lyric, 
 	id, _ := strconv.Atoi(songID)
 	body := map[string]any{
 		"id": id,
-		"cp": false,
-		"lv": 0, "kv": 0, "tv": 0, "rv": 0,
-		"yv": 0, "ytv": 0, "yrv": 0,
+		"cp": "false",
+		"lv": "0", "kv": "0", "tv": "0", "rv": "0",
+		"yv": "0", "ytv": "0", "yrv": "0",
 		"csrf_token": "",
 	}
+	body["header"] = c.eapiHeader()
 	jsonBody, _ := json.Marshal(body)
 
 	eapiURL := apiInterface3URL + "/eapi" + lyricPath
@@ -296,6 +301,22 @@ func (c *Client) GetLyric(ctx context.Context, songID string) (*musicapi.Lyric, 
 	}
 
 	return lyric, nil
+}
+
+func (c *Client) eapiHeader() map[string]any {
+	return map[string]any{
+		"os":          "pc",
+		"appver":      "3.1.17.204416",
+		"versioncode": "140",
+		"osver":       "Microsoft-Windows-10-Professional-build-22631-64bit",
+		"deviceId":    c.deviceID,
+		"mobilename":  "",
+		"buildver":    strconv.FormatInt(time.Now().Unix(), 10),
+		"resolution":  "1920x1080",
+		"channel":     "netease",
+		"requestId":   fmt.Sprintf("%d_%04d", time.Now().UnixMilli(), time.Now().UnixNano()%1000),
+		"__csrf":      "",
+	}
 }
 
 func parseNeteaseTimedLines(content string) []musicapi.LyricLine {

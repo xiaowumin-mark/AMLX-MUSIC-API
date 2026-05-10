@@ -16,10 +16,12 @@ import (
 const (
 	name = "qq"
 
-	musicuFCG = "https://u.y.qq.com/cgi-bin/musicu.fcg"
-	lrcAPIURL = "https://c.y.qq.com/lyric/fcgi-bin/fcg_query_lyric_new.fcg"
-	qqReferer = "https://y.qq.com/portal/player.html"
-	qqOrigin  = "https://y.qq.com"
+	musicuFCG        = "https://u.y.qq.com/cgi-bin/musicu.fcg"
+	lrcAPIURL        = "https://c.y.qq.com/lyric/fcgi-bin/fcg_query_lyric_new.fcg"
+	lyricDownloadURL = "https://c.y.qq.com/qqmusic/fcgi-bin/lyric_download.fcg"
+	qqReferer        = "https://y.qq.com/portal/player.html"
+	qqOrigin         = "https://y.qq.com"
+	qqUserAgent      = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36"
 
 	searchModule      = "music.search.SearchCgiService"
 	searchMethod      = "DoSearchForQQMusicMobile"
@@ -67,6 +69,11 @@ func New(opts ...musicapi.Option) (*Client, error) {
 		qimei: qimeiResult.Q36,
 	}
 	c.http.SetCommonHeader("Referer", qqReferer)
+	c.http.SetCommonHeader("Origin", qqOrigin)
+	c.http.SetCommonHeader("User-Agent", qqUserAgent)
+	if cfg.Cookie != "" {
+		c.http.SetCommonHeader("Cookie", cfg.Cookie)
+	}
 	return c, nil
 }
 
@@ -262,8 +269,107 @@ func (c *Client) GetLyric(ctx context.Context, songID string) (*musicapi.Lyric, 
 	if romaText != "" {
 		lyric.Romanization = parseQQTimedLines(romaText)
 	}
+	if !hasSyllables(lyric.Lines) {
+		if fallback, err := c.getLyricQRCDownload(ctx, songID); err == nil && hasSyllables(fallback.Lines) {
+			return fallback, nil
+		}
+	}
 
 	return lyric, nil
+}
+
+func hasSyllables(lines []musicapi.LyricLine) bool {
+	for _, line := range lines {
+		if len(line.Syllables) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func (c *Client) getLyricQRCDownload(ctx context.Context, songID string) (*musicapi.Lyric, error) {
+	musicID, err := strconv.ParseInt(songID, 10, 64)
+	if err != nil {
+		song, detailErr := c.GetSong(ctx, songID)
+		if detailErr != nil {
+			return nil, detailErr
+		}
+		idVal, ok := song.PlatformExtra["qq_id"].(int)
+		if !ok || idVal == 0 {
+			return nil, fmt.Errorf("qq lyric fallback: missing numeric song id")
+		}
+		musicID = int64(idVal)
+	}
+	raw, err := c.http.PostForm(lyricDownloadURL, map[string]string{
+		"version":     "15",
+		"miniversion": "82",
+		"lrctype":     "4",
+		"musicid":     strconv.FormatInt(musicID, 10),
+	}, map[string]string{
+		"Referer": "https://y.qq.com",
+	})
+	if err != nil {
+		return nil, fmt.Errorf("qq lyric qrc download: %w", err)
+	}
+	mainEnc := extractXMLCDATA(raw, "content")
+	transEnc := extractXMLCDATA(raw, "contentts")
+	romaEnc := extractXMLCDATA(raw, "contentroma")
+	if mainEnc == "" {
+		return nil, fmt.Errorf("qq lyric qrc download: empty content")
+	}
+	mainText, err := QrcDecrypt(mainEnc)
+	if err != nil {
+		return nil, err
+	}
+	transText, _ := QrcDecrypt(transEnc)
+	romaText, _ := QrcDecrypt(romaEnc)
+	mainText = repairUTF8Mojibake(ExtractFromQRcWrapper(mainText))
+	transText = repairUTF8Mojibake(ExtractFromQRcWrapper(transText))
+	romaText = repairUTF8Mojibake(ExtractFromQRcWrapper(romaText))
+	lyric := &musicapi.Lyric{Raw: mainText}
+	if c.cfg.EnableLyricClean && mainText != "" {
+		cleaner := c.getCleaner()
+		cleaned, _ := cleaner.Clean(mainText)
+		lyric.Lines = parseQQTimedLines(cleaned)
+	} else {
+		lyric.Lines = parseQQTimedLines(mainText)
+	}
+	if transText != "" {
+		lyric.Translation = parseQQTimedLines(transText)
+	}
+	if romaText != "" {
+		lyric.Romanization = parseQQTimedLines(romaText)
+	}
+	return lyric, nil
+}
+
+func extractXMLCDATA(xmlText, tag string) string {
+	endTag := "</" + tag + ">"
+	start := strings.Index(xmlText, "<"+tag+">")
+	if start >= 0 {
+		start += len("<" + tag + ">")
+	} else {
+		start = strings.Index(xmlText, "<"+tag+" ")
+		if start < 0 {
+			return ""
+		}
+		close := strings.Index(xmlText[start:], ">")
+		if close < 0 {
+			return ""
+		}
+		start += close + 1
+	}
+	if start < 0 {
+		return ""
+	}
+	end := strings.Index(xmlText[start:], endTag)
+	if end < 0 {
+		return ""
+	}
+	content := strings.TrimSpace(xmlText[start : start+end])
+	content = strings.TrimPrefix(content, "<![CDATA[")
+	content = strings.TrimSuffix(content, "]]>")
+	return strings.TrimSpace(content)
 }
 
 func parseQQTimedLines(content string) []musicapi.LyricLine {
@@ -406,29 +512,48 @@ func stripQrcSyllableTags(s string) string {
 
 func repairUTF8Mojibake(s string) string {
 	best := s
-	for i := 0; i < 3 && looksMojibake(best); i++ {
+	for i := 0; i < 8; i++ {
+		if !looksMojibake(best) {
+			break
+		}
 		b := make([]byte, 0, len(best))
-		ok := true
 		for _, r := range best {
 			if r > 255 {
-				ok = false
-				break
+				b = append(b, string(r)...)
+				continue
 			}
 			b = append(b, byte(r))
 		}
-		if !ok || !utf8.Valid(b) {
+		if !utf8.Valid(b) {
+			candidate := strings.ToValidUTF8(string(b), "")
+			if candidate == best {
+				break
+			}
+			best = candidate
+			continue
+		}
+		candidate := string(b)
+		if candidate == best {
 			break
 		}
-		best = string(b)
+		best = candidate
 	}
 	return best
+}
+
+func mojibakeScore(s string) int {
+	return strings.Count(s, "Ã") + strings.Count(s, "Â") + strings.Count(s, "\u0083") +
+		strings.Count(s, "ä") + strings.Count(s, "å") + strings.Count(s, "ç") +
+		strings.Count(s, "è") + strings.Count(s, "é") + strings.Count(s, "æ") +
+		strings.Count(s, "ã") + strings.Count(s, "¸") + strings.Count(s, "¦") +
+		strings.Count(s, "¯") + strings.Count(s, "´") + strings.Count(s, "°")
 }
 
 func looksMojibake(s string) bool {
 	if s == "" {
 		return false
 	}
-	return strings.Count(s, "Ã")+strings.Count(s, "Â")+strings.Count(s, "\u0083") > 3
+	return mojibakeScore(s) > 1
 }
 
 func (c *Client) getLyricLRCOnly(ctx context.Context, songID string) (*musicapi.Lyric, error) {

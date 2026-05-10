@@ -36,6 +36,7 @@ const (
 	everydayRecPath   = "/everyday_song_recommend"
 
 	androidUA = "Android15-1070-11083-46-0-DiscoveryDRADProtocol-wifi"
+	browserUA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36"
 )
 
 // Client is the KuGou Music API client implementing musicapi.MusicProvider.
@@ -66,6 +67,9 @@ func New(opts ...musicapi.Option) (*Client, error) {
 	}
 	c.http.SetCommonHeader("User-Agent", androidUA)
 	c.http.SetCommonHeader("kg-tid", "255")
+	if cfg.Cookie != "" {
+		c.http.SetCommonHeader("Cookie", cfg.Cookie)
+	}
 
 	// Try to register device; non-fatal
 	c.registerDevice(context.Background())
@@ -253,7 +257,8 @@ func (c *Client) GetLyric(ctx context.Context, songID string) (*musicapi.Lyric, 
 		"hash":    songID,
 		"keyword": "",
 	}
-	raw, err := c.http.Get(lyricsAPIURL+lyricSearchPath, searchParams, nil)
+	lyricHeaders := map[string]string{"User-Agent": browserUA}
+	raw, err := c.http.Get(lyricsAPIURL+lyricSearchPath, searchParams, lyricHeaders)
 	if err != nil {
 		return nil, fmt.Errorf("kugou lyric search: %w", err)
 	}
@@ -275,7 +280,7 @@ func (c *Client) GetLyric(ctx context.Context, songID string) (*musicapi.Lyric, 
 		"fmt":       "krc",
 		"charset":   "utf8",
 	}
-	raw, err = c.http.Get(lyricsAPIURL+lyricDownloadPath, dlParams, nil)
+	raw, err = c.http.Get(lyricsAPIURL+lyricDownloadPath, dlParams, lyricHeaders)
 	if err != nil {
 		return nil, fmt.Errorf("kugou lyric download: %w", err)
 	}
