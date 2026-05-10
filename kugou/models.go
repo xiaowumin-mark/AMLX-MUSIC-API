@@ -194,6 +194,12 @@ type KuGouAudioInfo struct {
 	TimeLength   int            `json:"timelength"`
 	TimeLength2  int            `json:"time_length"`
 	FeeType      int            `json:"fee_type"`
+	AlbumImg     string         `json:"album_img"`
+	Image        string         `json:"image"`
+	Img          string         `json:"img"`
+	SizableCover string         `json:"sizable_cover"`
+	AuthorImg    string         `json:"author_img"`
+	SingerImg    string         `json:"singer_img"`
 	SingerInfo   []struct {
 		ID   flexibleString `json:"id"`
 		Name string         `json:"name"`
@@ -205,6 +211,24 @@ type SingerSongsResponse struct {
 	Status    int              `json:"status"`
 	ErrorCode int              `json:"error_code"`
 	Data      []KuGouAudioInfo `json:"data"`
+}
+
+// ArtistDetailResponse wraps /kmr/v3/author.
+type ArtistDetailResponse struct {
+	Status    int             `json:"status"`
+	ErrorCode int             `json:"error_code"`
+	Data      KuGouArtistInfo `json:"data"`
+}
+
+type KuGouArtistInfo struct {
+	AuthorID string `json:"author_id"`
+	ID       string `json:"id"`
+	Name     string `json:"author_name"`
+	Name2    string `json:"name"`
+	Pic      string `json:"pic"`
+	Pic2     string `json:"sizable_avatar"`
+	Avatar   string `json:"avatar"`
+	Intro    string `json:"intro"`
 }
 
 // PlaylistDetailResponse wraps /v3/get_list_info.

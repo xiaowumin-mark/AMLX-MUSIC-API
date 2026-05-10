@@ -456,10 +456,11 @@ func (c *Client) GetArtist(ctx context.Context, artistID string) (*musicapi.Arti
 		return nil, fmt.Errorf("netease artist detail parse: %w", err)
 	}
 
+	picURL := artistResp.Data.Artist.PicURL
 	artist := &musicapi.Artist{
 		ID:          strconv.Itoa(artistResp.Data.Artist.ID),
 		Name:        artistResp.Data.Artist.Name,
-		PicURL:      artistResp.Data.Artist.PicURL,
+		PicURL:      picURL,
 		Description: artistResp.Data.Artist.BriefDesc,
 	}
 
@@ -471,6 +472,20 @@ func (c *Client) GetArtist(ctx context.Context, artistID string) (*musicapi.Arti
 		if json.Unmarshal([]byte(songsRaw), &songsResp) == nil && songsResp.Code == 200 {
 			for _, s := range songsResp.HotSongs {
 				artist.HotSongs = append(artist.HotSongs, convertSong(s))
+			}
+			if artist.PicURL == "" {
+				artist.PicURL = songsResp.Artist.PicURL
+			}
+			_ = c.fillSearchSongCovers(ctx, artist.HotSongs)
+		}
+	}
+	if artist.PicURL == "" {
+		if searched, err := c.Search(ctx, artist.Name, musicapi.SearchTypeArtist, 1, 10); err == nil {
+			for _, item := range searched.Artists {
+				if item.ID == artist.ID && item.PicURL != "" {
+					artist.PicURL = item.PicURL
+					break
+				}
 			}
 		}
 	}

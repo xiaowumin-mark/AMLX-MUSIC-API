@@ -27,6 +27,7 @@ const (
 	albumDetailPath   = "/kmr/v2/albums"
 	albumSongsPath    = "/v1/album_audio/lite"
 	singerSongsPath   = "/kmr/v1/audio_group/author"
+	artistDetailPath  = "/kmr/v3/author"
 	playlistInfoPath  = "/v3/get_list_info"
 	playlistSongsPath = "/pubsongs/v2/get_other_list_file_nofilt"
 	songDetailPath    = "/v2/get_res_privilege/lite"
@@ -381,6 +382,12 @@ func (c *Client) GetPlaylist(ctx context.Context, playlistID string) (*musicapi.
 
 // GetArtist fetches artist songs.
 func (c *Client) GetArtist(ctx context.Context, artistID string) (*musicapi.Artist, error) {
+	artist := &musicapi.Artist{ID: artistID}
+	if detail, err := c.getArtistDetail(ctx, artistID); err == nil {
+		artist.Name = firstNonEmpty(detail.Name, detail.Name2)
+		artist.PicURL = normalizeKugouCover(firstNonEmpty(detail.Pic, detail.Pic2, detail.Avatar))
+		artist.Description = detail.Intro
+	}
 	clienttime := c.ct()
 	body := map[string]any{
 		"appid":      appID,
@@ -413,15 +420,40 @@ func (c *Client) GetArtist(ctx context.Context, artistID string) (*musicapi.Arti
 		return nil, fmt.Errorf("kugou artist songs: status=%d error_code=%d raw=%s", resp.Status, resp.ErrorCode, truncRaw(raw))
 	}
 
-	artist := &musicapi.Artist{ID: artistID}
 	for _, s := range resp.Data {
 		song := convertAudioInfo(s)
 		if artist.Name == "" && len(song.Artists) > 0 {
 			artist.Name = song.Artists[0].Name
 		}
+		if artist.PicURL == "" {
+			artist.PicURL = normalizeKugouCover(firstNonEmpty(s.AuthorImg, s.SingerImg))
+		}
 		artist.HotSongs = append(artist.HotSongs, song)
 	}
+	_ = c.fillSearchSongCovers(ctx, artist.HotSongs)
 	return artist, nil
+}
+
+func (c *Client) getArtistDetail(ctx context.Context, artistID string) (*KuGouArtistInfo, error) {
+	_ = ctx
+	body := map[string]any{"author_id": artistID}
+	jsonBody, _ := json.Marshal(body)
+	params := c.commonParams(nil)
+	params["signature"] = signatureAndroidParams(params, string(jsonBody), false)
+	headers := map[string]string{"x-router": "openapi.kugou.com", "Content-Type": "application/json", "kg-tid": "36"}
+	rawURL := openapiURL + artistDetailPath + "?" + buildQuery(params)
+	raw, err := c.http.RawPost(rawURL, jsonBody, headers)
+	if err != nil {
+		return nil, err
+	}
+	var resp ArtistDetailResponse
+	if err := json.Unmarshal([]byte(raw), &resp); err != nil {
+		return nil, err
+	}
+	if resp.Status != 1 || resp.ErrorCode != 0 {
+		return nil, fmt.Errorf("kugou artist detail: status=%d error_code=%d", resp.Status, resp.ErrorCode)
+	}
+	return &resp.Data, nil
 }
 
 // GetAlbum fetches album details and tracks.
@@ -454,7 +486,7 @@ func (c *Client) GetAlbum(ctx context.Context, albumID string) (*musicapi.Album,
 	album := &musicapi.Album{
 		ID:          string(info.AlbumID),
 		Name:        info.AlbumName,
-		CoverURL:    info.SizableCover,
+		CoverURL:    normalizeKugouCover(info.SizableCover),
 		Description: info.Intro,
 		ReleaseDate: info.PublishDate,
 		PlatformExtra: map[string]any{
@@ -636,12 +668,14 @@ func convertAudioInfo(s KuGouAudioInfo) *musicapi.Song {
 			s.SingerID = string(s.SingerInfo[0].ID)
 		}
 	}
+	cover := normalizeKugouCover(firstNonEmpty(s.AlbumImg, s.Image, s.Img, s.SizableCover))
 	return &musicapi.Song{
 		ID:       s.Hash,
 		Name:     name,
 		Duration: duration,
+		CoverURL: cover,
 		Artists:  []musicapi.ArtistBrief{{ID: s.SingerID, Name: artist}},
-		Album:    &musicapi.AlbumBrief{ID: string(s.AlbumID), Name: s.AlbumName},
+		Album:    &musicapi.AlbumBrief{ID: string(s.AlbumID), Name: s.AlbumName, CoverURL: cover},
 		PlatformExtra: map[string]any{
 			"audio_id": s.AudioID,
 			"fee_type": s.FeeType,
@@ -673,10 +707,7 @@ func convertSongPrivilege(s SongPrivilege) *musicapi.Song {
 	if duration == 0 && s.Info.Duration > 0 {
 		duration = s.Info.Duration / 1000
 	}
-	cover := firstNonEmpty(s.AlbumImg, s.Info.Image)
-	if strings.Contains(cover, "{size}") {
-		cover = strings.ReplaceAll(cover, "{size}", "400")
-	}
+	cover := normalizeKugouCover(firstNonEmpty(s.AlbumImg, s.Info.Image))
 	return &musicapi.Song{
 		ID:       s.Hash,
 		Name:     name,
@@ -700,6 +731,13 @@ func firstNonEmpty(vals ...string) string {
 	return ""
 }
 
+func normalizeKugouCover(cover string) string {
+	if strings.Contains(cover, "{size}") {
+		cover = strings.ReplaceAll(cover, "{size}", "400")
+	}
+	return cover
+}
+
 func firstInt(vals ...int) int {
 	for _, v := range vals {
 		if v != 0 {
@@ -711,9 +749,7 @@ func firstInt(vals ...int) int {
 
 func convertPlaylist(p PlaylistInfo) *musicapi.Playlist {
 	cover := firstNonEmpty(p.ImgURL, p.Pic)
-	if strings.Contains(cover, "{size}") {
-		cover = strings.ReplaceAll(cover, "{size}", "150")
-	}
+	cover = normalizeKugouCover(cover)
 	pl := &musicapi.Playlist{
 		ID:          p.GlobalCollectionID,
 		Name:        p.Name,

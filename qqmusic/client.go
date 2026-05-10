@@ -673,6 +673,16 @@ func (c *Client) GetPlaylist(ctx context.Context, playlistID string) (*musicapi.
 // GetArtist fetches artist songs.
 func (c *Client) GetArtist(ctx context.Context, artistID string) (*musicapi.Artist, error) {
 	payload := BuildBatchPayload(c.qimei, map[string]BatchMethod{
+		"singer": {
+			Module: "music.musichallSinger.SingerInfoInter",
+			Method: "GetSingerDetail",
+			Param: map[string]any{
+				"singer_mid":   artistID,
+				"ex_singer":    1,
+				"group_singer": 1,
+				"wiki_singer":  1,
+			},
+		},
 		"singerSongs": {
 			Module: singerSongsModule,
 			Method: singerSongsMethod,
@@ -707,10 +717,24 @@ func (c *Client) GetArtist(ctx context.Context, artistID string) (*musicapi.Arti
 	}
 
 	artist := &musicapi.Artist{ID: artistID}
+	if singerRaw, ok := batchResp["singer"]; ok {
+		var singerResp SingerDetailResponse
+		if json.Unmarshal(singerRaw, &singerResp) == nil {
+			info := singerResp.Data.SingerInfo
+			artist.Name = firstText(info.Name, info.Title)
+			artist.PicURL = firstText(info.Pic, info.Photo, info.HeadPic)
+			if artist.PicURL == "" && info.Mid != "" {
+				artist.PicURL = GetSingerPicURL(info.Mid, 300)
+			}
+		}
+	}
 	for _, s := range resp.Data.SongList {
 		song := convertQQTrack(s.SongInfo)
 		if artist.Name == "" && len(song.Artists) > 0 {
 			artist.Name = song.Artists[0].Name
+		}
+		if artist.PicURL == "" && len(song.Artists) > 0 && song.Artists[0].ID != "" {
+			artist.PicURL = GetSingerPicURL(song.Artists[0].ID, 300)
 		}
 		artist.HotSongs = append(artist.HotSongs, song)
 	}

@@ -98,7 +98,15 @@ func demoArtist(ctx context.Context, platform, id, label string) {
 			fmt.Printf("    ... 共 %d 首 ...\n", len(artist.HotSongs))
 			break
 		}
-		fmt.Printf("    %2d. %-25s | %3ds\n", i+1, trunc(s.Name, 25), s.Duration)
+		cover := s.CoverURL
+		if cover == "" && s.Album != nil {
+			cover = s.Album.CoverURL
+		}
+		fmt.Printf("    %2d. %-25s | %3ds", i+1, trunc(s.Name, 25), s.Duration)
+		if cover != "" {
+			fmt.Printf(" | %s", cover)
+		}
+		fmt.Println()
 	}
 }
 

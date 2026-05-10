@@ -128,6 +128,25 @@ type SingerSongListData struct {
 	SongList []AlbumSongItem `json:"songList"`
 }
 
+// SingerDetailResponse wraps singer detail metadata.
+type SingerDetailResponse struct {
+	Code int              `json:"code"`
+	Data SingerDetailData `json:"data"`
+}
+
+type SingerDetailData struct {
+	SingerInfo QQSingerInfo `json:"singer_info"`
+}
+
+type QQSingerInfo struct {
+	Mid     string `json:"mid"`
+	Name    string `json:"name"`
+	Title   string `json:"title"`
+	Pic     string `json:"pic"`
+	Photo   string `json:"photo"`
+	HeadPic string `json:"headpic"`
+}
+
 // PlaylistResponse wraps playlist detail.
 type PlaylistResponse struct {
 	Code int          `json:"code"`

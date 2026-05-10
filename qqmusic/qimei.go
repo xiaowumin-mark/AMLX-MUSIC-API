@@ -231,5 +231,16 @@ func base64Decode(dst, src []byte) int {
 
 // GetAlbumCoverURL builds the QQ Music album cover image URL.
 func GetAlbumCoverURL(albumMID string, size int) string {
+	if albumMID == "" {
+		return ""
+	}
 	return fmt.Sprintf("https://y.gtimg.cn/music/photo_new/T002R%dx%dM000%s.jpg", size, size, albumMID)
+}
+
+// GetSingerPicURL builds the QQ Music singer image URL.
+func GetSingerPicURL(singerMID string, size int) string {
+	if singerMID == "" {
+		return ""
+	}
+	return fmt.Sprintf("https://y.gtimg.cn/music/photo_new/T001R%dx%dM000%s.jpg", size, size, singerMID)
 }
