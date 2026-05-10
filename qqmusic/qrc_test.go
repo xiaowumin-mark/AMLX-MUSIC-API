@@ -59,6 +59,22 @@ func TestQrcDecryptWithFallback(t *testing.T) {
 	}
 }
 
+func TestQrcParseSyllables(t *testing.T) {
+	lines := parseQrcLines("[1000,1200](1000,300,0)海(1300,300,0)阔(1600,300,0)天(1900,300,0)空")
+	if len(lines) != 1 {
+		t.Fatalf("Expected 1 line, got %d", len(lines))
+	}
+	if lines[0].Text != "海阔天空" {
+		t.Fatalf("Text = %q, want 海阔天空", lines[0].Text)
+	}
+	if len(lines[0].Syllables) != 4 {
+		t.Fatalf("Expected 4 syllables, got %d", len(lines[0].Syllables))
+	}
+	if lines[0].Syllables[1].Time != 1300 || lines[0].Syllables[1].Text != "阔" {
+		t.Errorf("Unexpected syllable: %+v", lines[0].Syllables[1])
+	}
+}
+
 func TestExtractFromQRcWrapper(t *testing.T) {
 	xmlContent := `<?xml version="1.0" encoding="utf-8"?>
 <QrcLyric LyricContent="[0,1000]test lyric content" QrcType="1"/>`

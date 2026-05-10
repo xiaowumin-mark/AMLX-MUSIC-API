@@ -144,7 +144,68 @@ func (c *Client) Search(ctx context.Context, keyword string, searchType musicapi
 	for _, s := range resp.Data.Lists {
 		result.Songs = append(result.Songs, convertSongFromSearch(s))
 	}
+	if len(result.Songs) > 0 {
+		_ = c.fillSearchSongCovers(ctx, result.Songs)
+	}
 	return result, nil
+}
+
+func (c *Client) fillSearchSongCovers(ctx context.Context, songs []*musicapi.Song) error {
+	_ = ctx
+	var resources []map[string]any
+	for _, song := range songs {
+		if song == nil || song.ID == "" || song.CoverURL != "" {
+			continue
+		}
+		resources = append(resources, map[string]any{
+			"type":     "audio",
+			"page_id":  0,
+			"hash":     song.ID,
+			"album_id": 0,
+		})
+	}
+	if len(resources) == 0 {
+		return nil
+	}
+	body := map[string]any{
+		"appid":            appID,
+		"area_code":        1,
+		"behavior":         "play",
+		"clientver":        clientVer,
+		"need_hash_offset": 1,
+		"relate":           1,
+		"support_verify":   1,
+		"resource":         resources,
+		"qualities":        []string{"128", "320", "flac", "high", "viper_atmos", "viper_tape", "viper_clear", "super", "multitrack"},
+	}
+	jsonBody, _ := json.Marshal(body)
+	params := c.commonParams(nil)
+	params["signature"] = signatureAndroidParams(params, string(jsonBody), false)
+	headers := map[string]string{"x-router": "media.store.kugou.com", "Content-Type": "application/json"}
+
+	rawURL := apiGateway + songDetailPath + "?" + buildQuery(params)
+	raw, err := c.http.RawPost(rawURL, jsonBody, headers)
+	if err != nil {
+		return err
+	}
+	var resp SongDetailResponse
+	if err := json.Unmarshal([]byte(raw), &resp); err != nil {
+		return err
+	}
+	covers := make(map[string]string, len(resp.Data))
+	for _, s := range resp.Data {
+		converted := convertSongPrivilege(s)
+		covers[converted.ID] = converted.CoverURL
+	}
+	for _, song := range songs {
+		if cover := covers[song.ID]; cover != "" {
+			song.CoverURL = cover
+			if song.Album != nil {
+				song.Album.CoverURL = cover
+			}
+		}
+	}
+	return nil
 }
 
 // GetSong fetches song detail.
@@ -617,7 +678,7 @@ func convertSongPrivilege(s SongPrivilege) *musicapi.Song {
 		Duration: duration,
 		CoverURL: cover,
 		Artists:  []musicapi.ArtistBrief{{Name: artist}},
-		Album:    &musicapi.AlbumBrief{ID: string(s.AlbumID), Name: s.AlbumName},
+		Album:    &musicapi.AlbumBrief{ID: string(s.AlbumID), Name: s.AlbumName, CoverURL: cover},
 		PlatformExtra: map[string]any{
 			"audio_id": s.AudioID,
 			"fee_type": s.FeeType,
@@ -715,14 +776,13 @@ func parseKRCLines(content string) []musicapi.LyricLine {
 			for i < len(runes) && runes[i] != '[' {
 				i++
 			}
-			text := string(runes[textStart:i])
-			// Remove syllable tags <x,y,z>
-			text = stripSyllableTags(text)
-			text = trimSpace(text)
+			text, syllables := parseKRCSyllables(string(runes[textStart:i]), startMs)
 			if text != "" {
 				lines = append(lines, musicapi.LyricLine{
-					Time: int64(startMs),
-					Text: text,
+					Time:      int64(startMs),
+					Duration:  int64(durMs),
+					Text:      text,
+					Syllables: syllables,
 				})
 			}
 		} else {
@@ -730,6 +790,49 @@ func parseKRCLines(content string) []musicapi.LyricLine {
 		}
 	}
 	return lines
+}
+
+func parseKRCSyllables(s string, lineStartMs int) (string, []musicapi.LyricSyllable) {
+	var text strings.Builder
+	var syllables []musicapi.LyricSyllable
+	runes := []rune(s)
+	for i := 0; i < len(runes); {
+		if runes[i] != '<' {
+			text.WriteRune(runes[i])
+			i++
+			continue
+		}
+		tagStart := i
+		for i < len(runes) && runes[i] != '>' {
+			i++
+		}
+		if i >= len(runes) {
+			text.WriteString(string(runes[tagStart:]))
+			break
+		}
+		tag := string(runes[tagStart : i+1])
+		i++
+		var offsetMs, durMs, _unused int
+		if _, err := fmt.Sscanf(tag, "<%d,%d,%d>", &offsetMs, &durMs, &_unused); err != nil {
+			continue
+		}
+		wordStart := i
+		for i < len(runes) && runes[i] != '<' {
+			i++
+		}
+		word := string(runes[wordStart:i])
+		word = strings.Trim(word, "\r\n")
+		if word == "" {
+			continue
+		}
+		text.WriteString(word)
+		syllables = append(syllables, musicapi.LyricSyllable{
+			Time:     int64(lineStartMs + offsetMs),
+			Duration: int64(durMs),
+			Text:     word,
+		})
+	}
+	return trimSpace(text.String()), syllables
 }
 
 func stripSyllableTags(s string) string {

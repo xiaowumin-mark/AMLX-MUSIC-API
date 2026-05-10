@@ -302,12 +302,88 @@ func parseQrcLines(content string) []musicapi.LyricLine {
 		for i < len(runes) && runes[i] != '[' {
 			i++
 		}
-		text := strings.TrimSpace(stripQrcSyllableTags(string(runes[textStart:i])))
+		text, syllables := parseQrcSyllables(string(runes[textStart:i]), startMs)
 		if text != "" {
-			lines = append(lines, musicapi.LyricLine{Time: int64(startMs), Text: text})
+			lines = append(lines, musicapi.LyricLine{
+				Time:      int64(startMs),
+				Duration:  int64(durMs),
+				Text:      text,
+				Syllables: syllables,
+			})
 		}
 	}
 	return lines
+}
+
+func parseQrcSyllables(s string, lineStartMs int) (string, []musicapi.LyricSyllable) {
+	var text strings.Builder
+	var syllables []musicapi.LyricSyllable
+	runes := []rune(s)
+	for i := 0; i < len(runes); {
+		open := runes[i]
+		if open != '(' && open != '<' {
+			text.WriteRune(runes[i])
+			i++
+			continue
+		}
+		close := ')'
+		if open == '<' {
+			close = '>'
+		}
+		tagStart := i
+		for i < len(runes) && runes[i] != close {
+			i++
+		}
+		if i >= len(runes) {
+			text.WriteString(string(runes[tagStart:]))
+			break
+		}
+		tag := string(runes[tagStart : i+1])
+		i++
+		nums, ok := parseQrcTimingTag(tag)
+		if !ok || len(nums) < 2 {
+			continue
+		}
+		startMs, durMs := nums[0], nums[1]
+		if open == '<' {
+			if startMs < lineStartMs {
+				startMs += lineStartMs
+			}
+		}
+		wordStart := i
+		for i < len(runes) && runes[i] != '(' && runes[i] != '<' {
+			i++
+		}
+		word := string(runes[wordStart:i])
+		if word == "" {
+			continue
+		}
+		text.WriteString(word)
+		syllables = append(syllables, musicapi.LyricSyllable{
+			Time:     int64(startMs),
+			Duration: int64(durMs),
+			Text:     word,
+		})
+	}
+	return strings.TrimSpace(text.String()), syllables
+}
+
+func parseQrcTimingTag(tag string) ([]int, bool) {
+	tag = strings.TrimSpace(tag)
+	tag = strings.Trim(tag, "()<>")
+	if tag == "" {
+		return nil, false
+	}
+	parts := strings.Split(tag, ",")
+	nums := make([]int, 0, len(parts))
+	for _, part := range parts {
+		n, err := strconv.Atoi(strings.TrimSpace(part))
+		if err != nil {
+			return nil, false
+		}
+		nums = append(nums, n)
+	}
+	return nums, true
 }
 
 func stripQrcSyllableTags(s string) string {
@@ -620,13 +696,14 @@ func convertQQSearchSong(s QQSearchSong) *musicapi.Song {
 	for i, singer := range s.Singer {
 		artists[i] = musicapi.ArtistBrief{ID: singer.Mid, Name: singer.Name}
 	}
+	cover := GetAlbumCoverURL(s.Album.Mid, 300)
 	return &musicapi.Song{
 		ID:        s.Mid,
 		Name:      s.Title,
 		Duration:  s.Interval,
 		Artists:   artists,
-		Album:     &musicapi.AlbumBrief{ID: s.Album.Mid, Name: s.Album.Name},
-		CoverURL:  GetAlbumCoverURL(s.Album.Mid, 300),
+		Album:     &musicapi.AlbumBrief{ID: s.Album.Mid, Name: s.Album.Name, CoverURL: cover},
+		CoverURL:  cover,
 		PayStatus: payStatus(s.Pay.PayPlay),
 		PlatformExtra: map[string]any{
 			"qq_id":   s.ID,
@@ -641,13 +718,14 @@ func convertQQTrack(t QQTrackInfo) *musicapi.Song {
 	for i, singer := range t.Singer {
 		artists[i] = musicapi.ArtistBrief{ID: singer.Mid, Name: singer.Name}
 	}
+	cover := GetAlbumCoverURL(t.Album.Mid, 300)
 	return &musicapi.Song{
 		ID:        t.Mid,
 		Name:      t.Name,
 		Duration:  t.Interval,
 		Artists:   artists,
-		Album:     &musicapi.AlbumBrief{ID: t.Album.Mid, Name: t.Album.Name},
-		CoverURL:  GetAlbumCoverURL(t.Album.Mid, 300),
+		Album:     &musicapi.AlbumBrief{ID: t.Album.Mid, Name: t.Album.Name, CoverURL: cover},
+		CoverURL:  cover,
 		PayStatus: payStatus(t.Pay.PayPlay),
 		PlatformExtra: map[string]any{
 			"qq_id":   t.ID,

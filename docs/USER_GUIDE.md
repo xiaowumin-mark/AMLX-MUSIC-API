@@ -227,6 +227,7 @@ type Song struct {
 说明：
 
 - `Duration` 单位为秒。
+- `CoverURL` 是歌曲所属专辑封面，`Album.CoverURL` 会尽量同步填充。
 - `PayStatus` 常见值包括 `free`、`vip`、`only`，不是所有平台都会返回。
 - `PlatformExtra` 存放平台原生 ID、付费字段等额外信息。
 
@@ -284,6 +285,29 @@ type Lyric struct {
 ```
 
 `LyricLine.Time` 单位是毫秒。
+
+逐字/音节时间轴放在 `LyricLine.Syllables`：
+
+```go
+type LyricLine struct {
+	Time      int64
+	Duration  int64
+	Text      string
+	Syllables []LyricSyllable
+}
+
+type LyricSyllable struct {
+	Time     int64
+	Duration int64
+	Text     string
+}
+```
+
+规则：
+
+- 平台返回 YRC、QRC、KRC 等逐字格式时，优先填充 `Syllables`。
+- 平台只返回 LRC 时，保留逐行歌词，`Syllables` 为空。
+- 调用方可以先检查 `len(line.Syllables)`，没有逐字片段时直接使用 `line.Time` 和 `line.Text`。
 
 ## 7. 配置选项
 
@@ -349,6 +373,14 @@ Cookie 主要用于登录态接口，例如每日推荐。不同平台对 Cookie
 | 网易云音乐 | LRC / YRC | 解析主歌词、翻译、罗马音 |
 | QQ 音乐 | QRC / LRC | QRC 解密，失败时 fallback 到 LRC |
 | 酷狗音乐 | KRC / LRC | KRC 解密解压，转换为统一时间轴 |
+
+逐字能力：
+
+| 平台 | 逐字来源 | fallback |
+| --- | --- | --- |
+| 网易云音乐 | YRC | LRC |
+| QQ 音乐 | QRC | LRC |
+| 酷狗音乐 | KRC | LRC/空结果 |
 
 默认启用歌词清洗，会移除常见元数据行，例如：
 

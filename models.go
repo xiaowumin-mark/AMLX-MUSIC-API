@@ -84,8 +84,18 @@ type Playlist struct {
 
 // LyricLine represents a single timed lyric line.
 type LyricLine struct {
-	Time int64  `json:"time"` // milliseconds
-	Text string `json:"text"`
+	Time      int64           `json:"time"` // milliseconds
+	Duration  int64           `json:"duration,omitempty"`
+	Text      string          `json:"text"`
+	Syllables []LyricSyllable `json:"syllables,omitempty"`
+}
+
+// LyricSyllable represents a word or syllable-level lyric segment.
+// Time is absolute in milliseconds. Duration is in milliseconds.
+type LyricSyllable struct {
+	Time     int64  `json:"time"`
+	Duration int64  `json:"duration,omitempty"`
+	Text     string `json:"text"`
 }
 
 // Lyric represents a unified lyric model across all platforms.

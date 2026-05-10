@@ -128,6 +128,9 @@ func (c *Client) Search(ctx context.Context, keyword string, searchType musicapi
 	for _, s := range resp.Result.Songs {
 		result.Songs = append(result.Songs, convertSong(s))
 	}
+	if len(result.Songs) > 0 {
+		_ = c.fillSearchSongCovers(ctx, result.Songs)
+	}
 	for _, a := range resp.Result.Albums {
 		result.Albums = append(result.Albums, convertAlbumFromSearch(a))
 	}
@@ -139,6 +142,72 @@ func (c *Client) Search(ctx context.Context, keyword string, searchType musicapi
 	}
 
 	return result, nil
+}
+
+func (c *Client) fillSearchSongCovers(ctx context.Context, songs []*musicapi.Song) error {
+	var ids []string
+	for _, song := range songs {
+		if song == nil || song.CoverURL != "" {
+			continue
+		}
+		ids = append(ids, song.ID)
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	items := make([]string, 0, len(ids))
+	for _, id := range ids {
+		items = append(items, fmt.Sprintf(`{"id":%s}`, id))
+	}
+	body := map[string]any{"c": "[" + strings.Join(items, ",") + "]"}
+	jsonBody, _ := json.Marshal(body)
+
+	raw, err := c.weapiRequest(ctx, apiBaseURL+"/weapi"+songDetailPath, string(jsonBody))
+	if err != nil {
+		return err
+	}
+	var resp SongDetailResponse
+	if err := json.Unmarshal([]byte(raw), &resp); err != nil {
+		return err
+	}
+	covers := make(map[string]string, len(resp.Songs))
+	for _, s := range resp.Songs {
+		converted := convertSong(s)
+		covers[converted.ID] = converted.CoverURL
+	}
+	for _, song := range songs {
+		if cover := covers[song.ID]; cover != "" {
+			song.CoverURL = cover
+			if song.Album != nil {
+				song.Album.CoverURL = cover
+			}
+		}
+	}
+	albumCovers := map[string]string{}
+	for _, song := range songs {
+		if song == nil || song.CoverURL != "" || song.Album == nil || song.Album.ID == "" || song.Album.ID == "0" {
+			continue
+		}
+		if _, ok := albumCovers[song.Album.ID]; ok {
+			continue
+		}
+		album, err := c.GetAlbum(ctx, song.Album.ID)
+		if err != nil {
+			albumCovers[song.Album.ID] = ""
+			continue
+		}
+		albumCovers[song.Album.ID] = album.CoverURL
+	}
+	for _, song := range songs {
+		if song == nil || song.CoverURL != "" || song.Album == nil {
+			continue
+		}
+		if cover := albumCovers[song.Album.ID]; cover != "" {
+			song.CoverURL = cover
+			song.Album.CoverURL = cover
+		}
+	}
+	return nil
 }
 
 // GetSong fetches detailed song information.
@@ -162,7 +231,14 @@ func (c *Client) GetSong(ctx context.Context, songID string) (*musicapi.Song, er
 	if len(resp.Songs) == 0 {
 		return nil, fmt.Errorf("netease song not found: %s", songID)
 	}
-	return convertSong(resp.Songs[0]), nil
+	song := convertSong(resp.Songs[0])
+	if song.CoverURL == "" && song.Album != nil && song.Album.ID != "" && song.Album.ID != "0" {
+		if album, err := c.GetAlbum(ctx, song.Album.ID); err == nil && album.CoverURL != "" {
+			song.CoverURL = album.CoverURL
+			song.Album.CoverURL = album.CoverURL
+		}
+	}
+	return song, nil
 }
 
 // GetLyric retrieves and decrypts lyrics for a song.
@@ -246,12 +322,59 @@ func parseNeteaseYRC(content string) []musicapi.LyricLine {
 		if _, err := fmt.Sscanf(line[:end+1], "[%d,%d]", &startMs, &durMs); err != nil {
 			continue
 		}
-		text := stripNeteaseYrcWords(line[end+1:])
+		text, syllables := parseNeteaseYrcWords(line[end+1:])
 		if text != "" {
-			lines = append(lines, musicapi.LyricLine{Time: int64(startMs), Text: text})
+			lines = append(lines, musicapi.LyricLine{
+				Time:      int64(startMs),
+				Duration:  int64(durMs),
+				Text:      text,
+				Syllables: syllables,
+			})
 		}
 	}
 	return lines
+}
+
+func parseNeteaseYrcWords(s string) (string, []musicapi.LyricSyllable) {
+	var text strings.Builder
+	var syllables []musicapi.LyricSyllable
+	runes := []rune(s)
+	for i := 0; i < len(runes); {
+		if runes[i] != '(' {
+			text.WriteRune(runes[i])
+			i++
+			continue
+		}
+		tagStart := i
+		for i < len(runes) && runes[i] != ')' {
+			i++
+		}
+		if i >= len(runes) {
+			text.WriteString(string(runes[tagStart:]))
+			break
+		}
+		tag := string(runes[tagStart : i+1])
+		i++
+		var startMs, durMs, _unused int
+		if _, err := fmt.Sscanf(tag, "(%d,%d,%d)", &startMs, &durMs, &_unused); err != nil {
+			continue
+		}
+		wordStart := i
+		for i < len(runes) && runes[i] != '(' {
+			i++
+		}
+		word := string(runes[wordStart:i])
+		if word == "" {
+			continue
+		}
+		text.WriteString(word)
+		syllables = append(syllables, musicapi.LyricSyllable{
+			Time:     int64(startMs),
+			Duration: int64(durMs),
+			Text:     word,
+		})
+	}
+	return strings.TrimSpace(text.String()), syllables
 }
 
 func stripNeteaseYrcWords(s string) string {
@@ -443,8 +566,9 @@ func convertSong(s NeteaseSong) *musicapi.Song {
 		Duration: duration / 1000,
 		CoverURL: albumInfo.PicURL,
 		Album: &musicapi.AlbumBrief{
-			ID:   strconv.Itoa(albumInfo.ID),
-			Name: albumInfo.Name,
+			ID:       strconv.Itoa(albumInfo.ID),
+			Name:     albumInfo.Name,
+			CoverURL: albumInfo.PicURL,
 		},
 		PlatformExtra: map[string]any{
 			"netease_id": s.ID,

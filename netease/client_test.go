@@ -78,8 +78,27 @@ func TestSongConversion(t *testing.T) {
 	if result.CoverURL != "https://p1.music.126.net/xxx.jpg" {
 		t.Error("Cover URL incorrect")
 	}
+	if result.Album.CoverURL != "https://p1.music.126.net/xxx.jpg" {
+		t.Error("Album cover URL incorrect")
+	}
 	if fee, ok := result.PlatformExtra["fee"].(int); !ok || fee != 0 {
 		t.Error("Fee info missing")
+	}
+}
+
+func TestYRCParseSyllables(t *testing.T) {
+	lines := parseNeteaseYRC("[1000,1200](1000,300,0)海(1300,300,0)阔(1600,300,0)天(1900,300,0)空")
+	if len(lines) != 1 {
+		t.Fatalf("Expected 1 line, got %d", len(lines))
+	}
+	if lines[0].Text != "海阔天空" {
+		t.Fatalf("Text = %q, want 海阔天空", lines[0].Text)
+	}
+	if len(lines[0].Syllables) != 4 {
+		t.Fatalf("Expected 4 syllables, got %d", len(lines[0].Syllables))
+	}
+	if lines[0].Syllables[2].Time != 1600 || lines[0].Syllables[2].Text != "天" {
+		t.Errorf("Unexpected syllable: %+v", lines[0].Syllables[2])
 	}
 }
 

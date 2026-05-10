@@ -179,6 +179,19 @@ type Lyric struct {
 }
 ```
 
+`LyricLine` 会优先携带逐字/音节时间轴：
+
+```go
+type LyricLine struct {
+	Time      int64
+	Duration  int64
+	Text      string
+	Syllables []LyricSyllable
+}
+```
+
+当平台返回 YRC/QRC/KRC 等逐字格式时，`Syllables` 会填充逐字片段；如果平台只返回 LRC，则保留逐行歌词，`Syllables` 为空。
+
 平台差异：
 
 | 平台 | 常见格式 | 处理方式 |

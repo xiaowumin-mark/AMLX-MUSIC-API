@@ -75,6 +75,9 @@ func TestKRCParse(t *testing.T) {
 	if lines[0].Text != "第一行歌词气..." {
 		t.Errorf("Line 0 text = %q, want '第一行歌词气...'", lines[0].Text)
 	}
+	if len(lines[0].Syllables) != 1 || lines[0].Syllables[0].Text != "气..." {
+		t.Errorf("Line 0 syllables = %+v, want one '气...' syllable", lines[0].Syllables)
+	}
 	if lines[1].Time != 6000 {
 		t.Errorf("Line 1 time = %d, want 6000", lines[1].Time)
 	}
@@ -90,6 +93,12 @@ func TestKRCParseSyllableStrip(t *testing.T) {
 	}
 	if lines[0].Text != "我想你了" {
 		t.Errorf("Text = %q, want '我想你了'", lines[0].Text)
+	}
+	if len(lines[0].Syllables) != 3 {
+		t.Fatalf("Expected 3 syllables, got %d", len(lines[0].Syllables))
+	}
+	if lines[0].Syllables[1].Time != 500 || lines[0].Syllables[1].Text != "你" {
+		t.Errorf("Unexpected syllable: %+v", lines[0].Syllables[1])
 	}
 }
 

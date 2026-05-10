@@ -108,8 +108,12 @@ func printSong(s *musicapi.Song) {
 }
 
 func printLyric(l *musicapi.Lyric) {
-	fmt.Printf("\n  【歌词】共 %d 句 + %d 翻译 + %d 罗马音\n",
-		len(l.Lines), len(l.Translation), len(l.Romanization))
+	syllableCount := 0
+	for _, line := range l.Lines {
+		syllableCount += len(line.Syllables)
+	}
+	fmt.Printf("\n  【歌词】共 %d 句 + %d 逐字片段 + %d 翻译 + %d 罗马音\n",
+		len(l.Lines), syllableCount, len(l.Translation), len(l.Romanization))
 
 	// 打印前 8 句歌词
 	showCount := 8
@@ -119,7 +123,11 @@ func printLyric(l *musicapi.Lyric) {
 	for i := range showCount {
 		line := l.Lines[i]
 		ts := fmtTS(line.Time)
-		fmt.Printf("    %s %s\n", ts, line.Text)
+		fmt.Printf("    %s %s", ts, line.Text)
+		if len(line.Syllables) > 0 {
+			fmt.Printf("  (逐字 %d)", len(line.Syllables))
+		}
+		fmt.Println()
 
 		// 有对应翻译时一并显示
 		if i < len(l.Translation) && l.Translation[i].Time == line.Time {
